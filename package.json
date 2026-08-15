@@ -1,0 +1,32 @@
+{
+  "name": "raktsetu",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@expo/ngrok": "^4.1.3",
+    "axios": "^1.19.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "expo": "~56.0.19",
+    "expo-location": "~56.0.23",
+    "expo-status-bar": "~56.0.4",
+    "express": "^5.2.1",
+    "firebase": "^12.17.1",
+    "mongodb-memory-server": "^11.2.0",
+    "mongoose": "^9.7.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-maps": "1.27.2",
+    "react-native-web": "^0.21.2",
+    "react-native-webview": "13.16.1",
+    "socket.io": "^4.8.3"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "private": true
+}

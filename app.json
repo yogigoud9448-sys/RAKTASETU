@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "RaktSetu",
+    "slug": "RaktSetu",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "RaktSetu needs location access to find nearby anonymous donors."
+      }
+    },
+    "android": {
+      "package": "com.hello.raktsetu",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBBj1zuErj1Y-etVbgib_XUKOGTGb0_a0M"
+        }
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
