@@ -23,7 +23,7 @@ const playEmergencyBeep = () => {
 
     osc.start();
     osc.stop(audioCtx.currentTime + 0.5);
-  } catch (e) {
+  } catch {
     console.warn("Audio Context not supported or allowed yet.");
   }
 };
@@ -31,7 +31,8 @@ const playEmergencyBeep = () => {
 export default function App() {
   const [screen, setScreen] = useState('onboarding'); // 'onboarding' | 'map' | 'chat'
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [selectedBlood, setSelectedBlood] = useState('AB+');
+  const [selectedBlood, setSelectedBlood] = useState('AB+'); // యూజర్ యొక్క బ్లడ్ గ్రూప్
+  const [requiredBlood, setRequiredBlood] = useState('A+');   // అత్యవసరంగా కావాల్సిన బ్లడ్ గ్రూప్ (NEW)
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -122,8 +123,10 @@ export default function App() {
           setCurrentSOS(data.activeSOS);
           setChatLogs(data.activeSOS.messages || []);
 
-          // If someone else requested blood and I am on map -> trigger siren & popup
-          if (data.activeSOS.requesterPhone !== phoneNumber && !data.activeSOS.acceptedDonorId) {
+          // లాజిక్: అడిగిన రక్తవర్గం (requiredBloodGroup) నా రక్తవర్గం (selectedBlood) తో మ్యాచ్ అయితేనే సైరన్ మోగుతుంది
+          const isTargetDonor = data.activeSOS.requiredBloodGroup === selectedBlood;
+
+          if (data.activeSOS.requesterPhone !== phoneNumber && !data.activeSOS.acceptedDonorId && isTargetDonor) {
             playEmergencyBeep();
             setIncomingAlertModal(true);
           }
@@ -150,17 +153,22 @@ export default function App() {
       const interval = setInterval(pollServerState, 2000);
       return () => clearInterval(interval);
     }
-  }, [screen]);
+  }, [screen, selectedBlood]);
 
-  // 4. Trigger Emergency Blood SOS
+  // 4. Trigger Emergency Blood SOS (కావాల్సిన గ్రూప్‌తో పంపిస్తుంది)
   const handleTriggerSOS = async () => {
     try {
       await fetch(`${API_BASE_URL}/api/trigger-sos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber, bloodGroup: selectedBlood, userUUID }),
+        body: JSON.stringify({ 
+          phoneNumber, 
+          bloodGroup: selectedBlood, 
+          requiredBloodGroup: requiredBlood, // టార్గెట్ గ్రూప్
+          userUUID 
+        }),
       });
-      alert('🚨 ఎమర్జెన్సీ అలర్ట్ మీ చుట్టుపక్కల ఉన్న డోనర్లకు పంపబడింది!');
+      alert(`🚨 ${requiredBlood} బ్లడ్ అత్యవసర రిక్వెస్ట్ సమీప డోనర్లకు పంపబడింది!`);
       setScreen('chat');
     } catch {
       alert('SOS ట్రిగ్గర్ కాలేదు.');
@@ -256,8 +264,32 @@ export default function App() {
             </View>
           ))}
 
+          {/* REQUIRED BLOOD GROUP SELECTOR (NEW) */}
+          <View style={styles.requiredSelectorContainer}>
+            <Text style={styles.requiredSelectorLabel}>🩸 SELECT REQUIRED BLOOD GROUP:</Text>
+            <View style={styles.requiredGrid}>
+              {BLOOD_GROUPS.map((bg) => (
+                <TouchableOpacity
+                  key={bg}
+                  style={[
+                    styles.reqBloodBtn,
+                    requiredBlood === bg && styles.reqBloodBtnActive
+                  ]}
+                  onPress={() => setRequiredBlood(bg)}
+                >
+                  <Text style={[
+                    styles.reqBloodBtnText,
+                    requiredBlood === bg && styles.reqBloodBtnTextActive
+                  ]}>
+                    {bg}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           <TouchableOpacity style={styles.sosButton} onPress={handleTriggerSOS}>
-            <Text style={styles.sosButtonText}>🚨 REQUEST EMERGENCY BLOOD (SOS)</Text>
+            <Text style={styles.sosButtonText}>🚨 REQUEST {requiredBlood} BLOOD (SOS)</Text>
           </TouchableOpacity>
         </View>
 
@@ -268,7 +300,7 @@ export default function App() {
               <Text style={styles.modalAlertIcon}>🚨</Text>
               <Text style={styles.modalTitle}>EMERGENCY BLOOD REQUEST!</Text>
               <Text style={styles.modalText}>
-                A patient within ~500m urgently requires <Text style={{ color: '#ff3b30', fontWeight: 'bold' }}>{currentSOS?.bloodGroup}</Text> blood!
+                A patient within ~500m urgently requires <Text style={{ color: '#ff3b30', fontWeight: 'bold' }}>{currentSOS?.requiredBloodGroup || currentSOS?.bloodGroup}</Text> blood!
               </Text>
               <TouchableOpacity style={styles.approveBtn} onPress={handleAcceptSOS}>
                 <Text style={styles.approveBtnText}>✅ APPROVE & OPEN ANONYMOUS CHAT</Text>
@@ -390,24 +422,34 @@ const styles = StyleSheet.create({
   logo: { fontSize: 24, fontWeight: '900', color: '#ff3b30' },
   badge: { backgroundColor: '#16181a', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: '#26292d' },
   badgeText: { color: '#00e676', fontSize: 11, fontWeight: '700' },
-  mapCanvas: { width: '100%', height: 300, backgroundColor: '#121416', borderRadius: 16, marginVertical: 15, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#202326' },
-  radarRing3: { position: 'absolute', width: 260, height: 260, borderRadius: 130, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.1)' },
-  radarRing2: { position: 'absolute', width: 170, height: 170, borderRadius: 85, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.2)' },
-  radarRing1: { position: 'absolute', width: 85, height: 85, borderRadius: 42.5, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.35)' },
+  mapCanvas: { width: '100%', height: 260, backgroundColor: '#121416', borderRadius: 16, marginVertical: 12, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#202326' },
+  radarRing3: { position: 'absolute', width: 240, height: 240, borderRadius: 120, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.1)' },
+  radarRing2: { position: 'absolute', width: 160, height: 160, borderRadius: 80, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.2)' },
+  radarRing1: { position: 'absolute', width: 80, height: 80, borderRadius: 40, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.35)' },
   userBeacon: { alignItems: 'center', zIndex: 10 },
   userDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#007aff', borderWidth: 3, borderColor: '#fff' },
   userLabel: { color: '#fff', fontSize: 10, fontWeight: '800', marginTop: 4 },
   donorPin: { position: 'absolute', width: 34, height: 34, borderRadius: 17, backgroundColor: '#ff3b30', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#fff' },
   pinBlood: { color: '#fff', fontSize: 11, fontWeight: '900' },
-  sheet: { width: '100%', backgroundColor: '#16181a', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#26292d' },
-  sheetTitle: { color: '#8e8e93', fontSize: 12, fontWeight: '700', marginBottom: 10 },
-  donorCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0c0d0e', padding: 10, borderRadius: 8, marginBottom: 8 },
-  donorIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255, 59, 48, 0.2)', justifyContent: 'center', alignItems: 'center' },
-  donorIconText: { color: '#ff3b30', fontWeight: '900', fontSize: 12 },
-  donorIdText: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  donorDistanceText: { color: '#8e8e93', fontSize: 11 },
+  sheet: { width: '100%', backgroundColor: '#16181a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#26292d' },
+  sheetTitle: { color: '#8e8e93', fontSize: 11, fontWeight: '700', marginBottom: 8 },
+  donorCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0c0d0e', padding: 8, borderRadius: 8, marginBottom: 6 },
+  donorIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255, 59, 48, 0.2)', justifyContent: 'center', alignItems: 'center' },
+  donorIconText: { color: '#ff3b30', fontWeight: '900', fontSize: 11 },
+  donorIdText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  donorDistanceText: { color: '#8e8e93', fontSize: 10 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#00e676' },
-  sosButton: { width: '100%', height: 48, backgroundColor: '#ff3b30', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 10 },
+
+  // Required Blood Group Selector Styles
+  requiredSelectorContainer: { marginTop: 10, marginBottom: 8, width: '100%' },
+  requiredSelectorLabel: { color: '#ff4d4d', fontSize: 11, fontWeight: '800', marginBottom: 6, letterSpacing: 0.5 },
+  requiredGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', width: '100%' },
+  reqBloodBtn: { width: '23%', height: 34, backgroundColor: '#0c0d0e', borderRadius: 6, justifyContent: 'center', alignItems: 'center', marginBottom: 6, borderWidth: 1, borderColor: '#333' },
+  reqBloodBtnActive: { backgroundColor: '#ff3b30', borderColor: '#ff3b30' },
+  reqBloodBtnText: { color: '#888', fontWeight: '700', fontSize: 12 },
+  reqBloodBtnTextActive: { color: '#fff' },
+
+  sosButton: { width: '100%', height: 48, backgroundColor: '#ff3b30', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 6 },
   sosButtonText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   subTitle: { color: '#8e8e93', fontSize: 13, marginTop: 4, marginBottom: 28 },
   label: { alignSelf: 'flex-start', color: '#8e8e93', fontSize: 11, fontWeight: '700', marginBottom: 8 },
