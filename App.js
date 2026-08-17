@@ -1,38 +1,52 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Modal } from 'react-native';
 
 const API_BASE_URL = "https://raktasetu-uvna.onrender.com";
 const BLOOD_GROUPS = ['A+', 'A-', 'B-', 'AB-', 'B+', 'O+', 'O-', 'AB+'];
 
-// Emergency Beep Sound Generator using Web Audio API
-const playEmergencyBeep = () => {
+// High-Pitch Emergency Siren (Web Audio API with Auto-Resume)
+const playEmergencyBeep = async () => {
   try {
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    
+    const audioCtx = new AudioContextClass();
+    if (audioCtx.state === 'suspended') {
+      await audioCtx.resume();
+    }
+
     const osc = audioCtx.createOscillator();
     const gainNode = audioCtx.createGain();
 
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(880, audioCtx.currentTime); // 880Hz Siren Tone
-    osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.4);
+    
+    // Siren Frequency Modulation (High-Low-High Siren Pitch)
+    const now = audioCtx.currentTime;
+    osc.frequency.setValueAtTime(800, now);
+    osc.frequency.linearRampToValueAtTime(1200, now + 0.3);
+    osc.frequency.linearRampToValueAtTime(700, now + 0.6);
+    osc.frequency.linearRampToValueAtTime(1200, now + 0.9);
+    osc.frequency.linearRampToValueAtTime(600, now + 1.3);
 
-    gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
+    // Volume ramp
+    gainNode.gain.setValueAtTime(0.5, now);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.4);
 
     osc.connect(gainNode);
     gainNode.connect(audioCtx.destination);
 
-    osc.start();
-    osc.stop(audioCtx.currentTime + 0.5);
-  } catch {
-    console.warn("Audio Context not supported or allowed yet.");
+    osc.start(now);
+    osc.stop(now + 1.4);
+  } catch (err) {
+    console.warn("Audio Play Error:", err);
   }
 };
 
 export default function App() {
-  const [screen, setScreen] = useState('onboarding'); // 'onboarding' | 'map' | 'chat'
+  const [screen, setScreen] = useState('onboarding');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [selectedBlood, setSelectedBlood] = useState('AB+'); // యూజర్ యొక్క బ్లడ్ గ్రూప్
-  const [requiredBlood, setRequiredBlood] = useState('A+');   // అత్యవసరంగా కావాల్సిన బ్లడ్ గ్రూప్ (NEW)
+  const [selectedBlood, setSelectedBlood] = useState('AB+'); // డోనర్ గ్రూప్
+  const [requiredBlood, setRequiredBlood] = useState('A+');   // కావాల్సిన గ్రూప్
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -45,6 +59,9 @@ export default function App() {
   const [incomingAlertModal, setIncomingAlertModal] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
   const [chatLogs, setChatLogs] = useState([]);
+  
+  // Ref to prevent continuous re-alert looping
+  const lastAlertedSosId = useRef(null);
 
   // 1. Send OTP
   const handleSendOTP = async () => {
@@ -108,7 +125,7 @@ export default function App() {
     }
   };
 
-  // 3. Radar & Emergency Poller (Every 2 Seconds)
+  // 3. Radar & Emergency Poller
   const pollServerState = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/get-nearby-donors`);
@@ -118,20 +135,19 @@ export default function App() {
         const others = (data.donors || []).filter(d => d.phoneNumber !== phoneNumber);
         setNearbyDonors(others);
 
-        // Check if there is an active SOS broadcast
         if (data.activeSOS) {
           setCurrentSOS(data.activeSOS);
           setChatLogs(data.activeSOS.messages || []);
 
-          // లాజిక్: అడిగిన రక్తవర్గం (requiredBloodGroup) నా రక్తవర్గం (selectedBlood) తో మ్యాచ్ అయితేనే సైరన్ మోగుతుంది
-          const isTargetDonor = data.activeSOS.requiredBloodGroup === selectedBlood;
+          // చెకింగ్: అడిగిన గ్రూప్ లేదా డిఫాల్ట్ గ్రూప్ నా బ్లడ్ గ్రూప్‌తో మ్యాచ్ అయిందా
+          const targetGroup = data.activeSOS.requiredBloodGroup || data.activeSOS.bloodGroup;
+          const isTargetDonor = targetGroup === selectedBlood;
 
           if (data.activeSOS.requesterPhone !== phoneNumber && !data.activeSOS.acceptedDonorId && isTargetDonor) {
             playEmergencyBeep();
             setIncomingAlertModal(true);
           }
 
-          // If request accepted -> navigate to live chat
           if (data.activeSOS.acceptedDonorId) {
             setIncomingAlertModal(false);
             if (screen === 'map') setScreen('chat');
@@ -155,8 +171,11 @@ export default function App() {
     }
   }, [screen, selectedBlood]);
 
-  // 4. Trigger Emergency Blood SOS (కావాల్సిన గ్రూప్‌తో పంపిస్తుంది)
+  // 4. Trigger Emergency Blood SOS
   const handleTriggerSOS = async () => {
+    // బటన్ నొక్కినప్పుడే యూజర్ యొక్క ఆడియో సందర్భాన్ని ఒకసారి అన్‌లాక్ చేద్దాం
+    playEmergencyBeep();
+
     try {
       await fetch(`${API_BASE_URL}/api/trigger-sos`, {
         method: 'POST',
@@ -164,7 +183,7 @@ export default function App() {
         body: JSON.stringify({ 
           phoneNumber, 
           bloodGroup: selectedBlood, 
-          requiredBloodGroup: requiredBlood, // టార్గెట్ గ్రూప్
+          requiredBloodGroup: requiredBlood, 
           userUUID 
         }),
       });
@@ -264,7 +283,7 @@ export default function App() {
             </View>
           ))}
 
-          {/* REQUIRED BLOOD GROUP SELECTOR (NEW) */}
+          {/* REQUIRED BLOOD GROUP SELECTOR */}
           <View style={styles.requiredSelectorContainer}>
             <Text style={styles.requiredSelectorLabel}>🩸 SELECT REQUIRED BLOOD GROUP:</Text>
             <View style={styles.requiredGrid}>
@@ -293,7 +312,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* INCOMING EMERGENCY POPUP MODAL WITH SOUND */}
+        {/* INCOMING EMERGENCY POPUP MODAL */}
         <Modal visible={incomingAlertModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -439,8 +458,6 @@ const styles = StyleSheet.create({
   donorIdText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   donorDistanceText: { color: '#8e8e93', fontSize: 10 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#00e676' },
-
-  // Required Blood Group Selector Styles
   requiredSelectorContainer: { marginTop: 10, marginBottom: 8, width: '100%' },
   requiredSelectorLabel: { color: '#ff4d4d', fontSize: 11, fontWeight: '800', marginBottom: 6, letterSpacing: 0.5 },
   requiredGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', width: '100%' },
@@ -448,7 +465,6 @@ const styles = StyleSheet.create({
   reqBloodBtnActive: { backgroundColor: '#ff3b30', borderColor: '#ff3b30' },
   reqBloodBtnText: { color: '#888', fontWeight: '700', fontSize: 12 },
   reqBloodBtnTextActive: { color: '#fff' },
-
   sosButton: { width: '100%', height: 48, backgroundColor: '#ff3b30', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 6 },
   sosButtonText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   subTitle: { color: '#8e8e93', fontSize: 13, marginTop: 4, marginBottom: 28 },

@@ -9,7 +9,7 @@ app.use(express.json());
 
 const otpStore = {};
 let activeDonors = [];
-let activeSOS = null; // { requesterPhone, bloodGroup, requesterId, acceptedDonorId, messages: [] }
+let activeSOS = null; // { requesterPhone, bloodGroup, requiredBloodGroup, requesterId, acceptedDonorId, messages: [] }
 
 // Health check
 app.get('/', (req, res) => res.send('🚀 RaktSetu Backend is running!'));
@@ -64,20 +64,25 @@ app.get('/api/get-nearby-donors', (req, res) => {
   });
 });
 
-// Trigger SOS
+// Trigger SOS (Updated with requiredBloodGroup)
 app.post('/api/trigger-sos', (req, res) => {
-  const { phoneNumber, bloodGroup, userUUID } = req.body;
+  const { phoneNumber, bloodGroup, requiredBloodGroup, userUUID } = req.body;
+  
+  const targetBlood = requiredBloodGroup || bloodGroup;
+
   activeSOS = {
     requesterPhone: phoneNumber,
-    bloodGroup: bloodGroup,
+    bloodGroup: bloodGroup,                     // రిక్వెస్టర్ గ్రూప్
+    requiredBloodGroup: targetBlood,            // అత్యవసరంగా కావాల్సిన టార్గెట్ గ్రూప్
     requesterId: userUUID,
     acceptedDonorId: null,
     messages: [
-      { sender: 'SYSTEM', text: '🔒 Encrypted Anonymous Channel Opened. Privacy Protected.' }
+      { sender: 'SYSTEM', text: `🚨 Emergency Alert Broadcasted for [ ${targetBlood} ] Blood!` }
     ]
   };
-  console.log(`🚨 SOS Triggered by ${userUUID} for Blood Group: ${bloodGroup}`);
-  res.json({ success: true, message: 'SOS Broadcasted successfully!' });
+
+  console.log(`🚨 SOS Triggered by ${userUUID} | Requester: ${bloodGroup} | Target: ${targetBlood}`);
+  res.json({ success: true, message: `SOS Broadcasted for ${targetBlood} donors!` });
 });
 
 // Accept SOS (by nearby donor)
@@ -87,7 +92,7 @@ app.post('/api/accept-sos', (req, res) => {
     activeSOS.acceptedDonorId = donorId;
     activeSOS.messages.push({
       sender: donorId,
-      text: 'I have accepted your request! I am approaching your location.'
+      text: '✅ I have accepted your request! I am on my way.'
     });
     console.log(`✅ SOS Accepted by Donor: ${donorId}`);
     return res.json({ success: true, activeSOS });
