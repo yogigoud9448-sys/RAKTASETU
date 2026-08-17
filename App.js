@@ -4,7 +4,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator,
 const API_BASE_URL = "https://raktasetu-uvna.onrender.com";
 const BLOOD_GROUPS = ['A+', 'A-', 'B-', 'AB-', 'B+', 'O+', 'O-', 'AB+'];
 
-// Emergency High-Pitch Siren Generator using Web Audio API
+// Emergency High-Pitch Siren Generator
 const playEmergencyBeep = async () => {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -21,7 +21,6 @@ const playEmergencyBeep = async () => {
     osc.type = 'sawtooth';
     const now = audioCtx.currentTime;
     
-    // Siren Tone Pitch Modulation
     osc.frequency.setValueAtTime(800, now);
     osc.frequency.linearRampToValueAtTime(1200, now + 0.3);
     osc.frequency.linearRampToValueAtTime(700, now + 0.6);
@@ -44,8 +43,8 @@ const playEmergencyBeep = async () => {
 export default function App() {
   const [screen, setScreen] = useState('onboarding'); // 'onboarding' | 'map' | 'chat'
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [selectedBlood, setSelectedBlood] = useState('AB+'); // రిజిస్టర్ చేసుకున్న రక్త వర్గం
-  const [requiredBlood, setRequiredBlood] = useState('A+');   // అత్యవసరంగా కావాల్సిన రక్త వర్గం
+  const [selectedBlood, setSelectedBlood] = useState('AB+');
+  const [requiredBlood, setRequiredBlood] = useState('A+');
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -56,12 +55,57 @@ export default function App() {
   // SOS, Alerts & Chat State
   const [currentSOS, setCurrentSOS] = useState(null);
   const [incomingAlertModal, setIncomingAlertModal] = useState(false);
-  const [dismissedSosPhone, setDismissedSosPhone] = useState(null); // Dismissed SOS ట్రాకర్
+  const [dismissedSosPhone, setDismissedSosPhone] = useState(null);
   const [chatMessage, setChatMessage] = useState('');
   const [chatLogs, setChatLogs] = useState([]);
 
-  // ================= 1. SEND OTP =================
-  const handleSendOTP = async () => {
+  // ================= 1. SESSION RESTORE (NO LOGOUT ON REFRESH) =================
+  useEffect(() => {
+    try {
+      const savedUser = localStorage.getItem('raktsetu_session');
+      if (savedUser) {
+        const session = JSON.parse(savedUser);
+        if (session.phoneNumber && session.userUUID) {
+          setPhoneNumber(session.phoneNumber);
+          setSelectedBlood(session.bloodGroup || 'AB+');
+          setUserUUID(session.userUUID);
+          setScreen('map');
+        }
+      }
+    } catch (e) {
+      console.warn("Local storage parse error", e);
+    }
+  }, []);
+
+  // ================= 2. BROWSER / MOBILE STEP-BY-STEP BACK BUTTON =================
+  useEffect(() => {
+    const handlePopState = (event) => {
+      if (event.state && event.state.screen) {
+        setScreen(event.state.screen);
+      } else {
+        // Step-by-step back fallback
+        setScreen((prev) => {
+          if (prev === 'chat') return 'map';
+          if (prev === 'map') {
+            localStorage.removeItem('raktsetu_session');
+            return 'onboarding';
+          }
+          return prev;
+        });
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigateTo = (newScreen) => {
+    window.history.pushState({ screen: newScreen }, "");
+    setScreen(newScreen);
+  };
+
+  // ================= 3. SEND / RESEND OTP =================
+  const handleSendOTP = async (isResend = false) => {
     if (phoneNumber.length !== 10) {
       alert('దయచేసి 10 అంకెల మొబైల్ నంబర్ ఇవ్వండి.');
       return;
@@ -75,7 +119,12 @@ export default function App() {
       });
       const data = await res.json();
       setOtpSent(true);
-      alert(data.message);
+      if (isResend) {
+        setOtp('');
+        alert('🔄 కొత్త OTP విజయవంతంగా పంపబడింది!');
+      } else {
+        alert(data.message);
+      }
     } catch {
       alert('సర్వర్ కనెక్ట్ కాలేదు.');
     } finally {
@@ -83,7 +132,7 @@ export default function App() {
     }
   };
 
-  // ================= 2. VERIFY OTP & ENTER RADAR =================
+  // ================= 4. VERIFY OTP & ENTER RADAR =================
   const handleVerifyOTP = async () => {
     if (otp.length < 4) {
       alert('సరైన OTP ఇవ్వండి.');
@@ -117,7 +166,13 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setUserUUID(data.userUUID);
-        setScreen('map');
+        // సెషన్‌ను సేవ్ చేయడం
+        localStorage.setItem('raktsetu_session', JSON.stringify({
+          phoneNumber,
+          bloodGroup: selectedBlood,
+          userUUID: data.userUUID
+        }));
+        navigateTo('map');
       } else {
         alert(data.message);
       }
@@ -128,7 +183,7 @@ export default function App() {
     }
   };
 
-  // ================= 3. RADAR & EMERGENCY POLLER (EVERY 2 SECONDS) =================
+  // ================= 5. POLLER (EVERY 2 SECONDS) =================
   const pollServerState = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/get-nearby-donors`);
@@ -142,7 +197,6 @@ export default function App() {
           setCurrentSOS(data.activeSOS);
           setChatLogs(data.activeSOS.messages || []);
 
-          // కేవలం కోరిన గ్రూప్ ఉన్నవారికి + డిస్మిస్ చేయని వారికి మాత్రమే సైరన్ మరియు మోడల్
           const targetGroup = data.activeSOS.requiredBloodGroup || data.activeSOS.bloodGroup;
           const isTargetDonor = targetGroup === selectedBlood;
           const isNotDismissed = dismissedSosPhone !== data.activeSOS.requesterPhone;
@@ -152,11 +206,10 @@ export default function App() {
             setIncomingAlertModal(true);
           }
 
-          // డోనర్ రిక్వెస్ట్‌ని Approve చేయగానే ఇద్దరికీ ఆటోమేటిక్‌గా Chat స్క్రీన్ ఓపెన్ అవుతుంది
           if (data.activeSOS.acceptedDonorId) {
             setIncomingAlertModal(false);
             if (screen === 'map') {
-              setScreen('chat');
+              navigateTo('chat');
             }
           }
         } else {
@@ -164,7 +217,7 @@ export default function App() {
           setIncomingAlertModal(false);
           setDismissedSosPhone(null);
           if (screen === 'chat') {
-            setScreen('map');
+            navigateTo('map');
           }
         }
       }
@@ -181,7 +234,7 @@ export default function App() {
     }
   }, [screen, selectedBlood, dismissedSosPhone]);
 
-  // ================= 4. TRIGGER EMERGENCY BLOOD SOS =================
+  // ================= 6. TRIGGER SOS =================
   const handleTriggerSOS = async () => {
     playEmergencyBeep();
     try {
@@ -196,13 +249,12 @@ export default function App() {
         }),
       });
       alert(`🚨 ${requiredBlood} బ్లడ్ అత్యవసర రిక్వెస్ట్ సమీప డోనర్లకు పంపబడింది!`);
-      // రిక్వెస్ట్ పెట్టిన వ్యక్తి స్క్రీన్ మారదు (డోనర్ అప్రూవ్ చేసే వరకు వేచి చూస్తారు)
     } catch {
       alert('SOS ట్రిగ్గర్ కాలేదు.');
     }
   };
 
-  // ================= 5. DONOR ACCEPTS REQUEST =================
+  // ================= 7. ACCEPT SOS =================
   const handleAcceptSOS = async () => {
     try {
       await fetch(`${API_BASE_URL}/api/accept-sos`, {
@@ -211,13 +263,13 @@ export default function App() {
         body: JSON.stringify({ donorId: userUUID }),
       });
       setIncomingAlertModal(false);
-      setScreen('chat');
+      navigateTo('chat');
     } catch {
       alert('యాక్సెప్ట్ చేయడంలో సమస్య వచ్చింది.');
     }
   };
 
-  // ================= 6. SEND ANONYMOUS CHAT MESSAGE =================
+  // ================= 8. SEND CHAT MESSAGE =================
   const handleSendMessage = async () => {
     if (!chatMessage.trim()) return;
     try {
@@ -233,10 +285,20 @@ export default function App() {
     }
   };
 
-  // ================= 7. CLOSE CHAT SESSION & PURGE =================
+  // ================= 9. CLOSE SOS SESSION =================
   const handleCloseSession = async () => {
     await fetch(`${API_BASE_URL}/api/close-sos`, { method: 'POST' });
-    setScreen('map');
+    navigateTo('map');
+  };
+
+  // ================= 10. MANUAL LOGOUT =================
+  const handleLogout = () => {
+    localStorage.removeItem('raktsetu_session');
+    setPhoneNumber('');
+    setOtp('');
+    setOtpSent(false);
+    setUserUUID('');
+    navigateTo('onboarding');
   };
 
   // =========================================================================
@@ -247,6 +309,12 @@ export default function App() {
       <View style={styles.container}>
         <View style={styles.topBar}>
           <Text style={styles.logo}>RaktSetu</Text>
+          <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
+            <Text style={styles.logoutBtnText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.badgeBar}>
           <View style={styles.badge}>
             <Text style={styles.badgeText}>Ghost-Pin Active (50-100m Masked)</Text>
           </View>
@@ -360,7 +428,10 @@ export default function App() {
     return (
       <View style={styles.container}>
         <View style={styles.topBar}>
-          <Text style={styles.logo}>RaktSetu Secure Chat</Text>
+          <TouchableOpacity onPress={() => navigateTo('map')} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>‹ Map</Text>
+          </TouchableOpacity>
+          <Text style={styles.logo}>RaktSetu Chat</Text>
           <TouchableOpacity onPress={handleCloseSession} style={styles.closeHeaderBtn}>
             <Text style={{ color: '#ff3b30', fontWeight: 'bold' }}>End SOS</Text>
           </TouchableOpacity>
@@ -437,8 +508,13 @@ export default function App() {
       </View>
 
       {otpSent && (
-        <View style={{ width: '100%', marginTop: 20 }}>
-          <Text style={styles.label}>ENTER OTP</Text>
+        <View style={{ width: '100%', marginTop: 15 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={styles.label}>ENTER OTP</Text>
+            <TouchableOpacity onPress={() => handleSendOTP(true)} disabled={loading}>
+              <Text style={styles.resendBtnText}>🔄 Resend OTP</Text>
+            </TouchableOpacity>
+          </View>
           <TextInput
             style={styles.input}
             placeholder="Enter received OTP..."
@@ -451,7 +527,7 @@ export default function App() {
         </View>
       )}
 
-      <TouchableOpacity style={styles.primaryBtn} onPress={otpSent ? handleVerifyOTP : handleSendOTP} disabled={loading}>
+      <TouchableOpacity style={styles.primaryBtn} onPress={otpSent ? handleVerifyOTP : () => handleSendOTP(false)} disabled={loading}>
         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryBtnText}>{otpSent ? 'VERIFY & ENTER RADAR' : 'GET OTP'}</Text>}
       </TouchableOpacity>
     </View>
@@ -460,11 +536,16 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0c0d0e', paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
-  topBar: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 25, paddingBottom: 15 },
+  topBar: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 20, paddingBottom: 10 },
   logo: { fontSize: 24, fontWeight: '900', color: '#ff3b30' },
+  badgeBar: { width: '100%', alignItems: 'flex-start', marginBottom: 10 },
   badge: { backgroundColor: '#16181a', paddingVertical: 5, paddingHorizontal: 10, borderRadius: 20, borderWidth: 1, borderColor: '#26292d' },
   badgeText: { color: '#00e676', fontSize: 11, fontWeight: '700' },
-  mapCanvas: { width: '100%', height: 260, backgroundColor: '#121416', borderRadius: 16, marginVertical: 12, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#202326' },
+  logoutBtn: { paddingVertical: 4, paddingHorizontal: 10, backgroundColor: '#26292d', borderRadius: 6 },
+  logoutBtnText: { color: '#8e8e93', fontSize: 12, fontWeight: '600' },
+  backBtn: { paddingVertical: 4, paddingHorizontal: 8 },
+  backBtnText: { color: '#007aff', fontSize: 15, fontWeight: 'bold' },
+  mapCanvas: { width: '100%', height: 250, backgroundColor: '#121416', borderRadius: 16, marginBottom: 12, justifyContent: 'center', alignItems: 'center', overflow: 'hidden', borderWidth: 1, borderColor: '#202326' },
   radarRing3: { position: 'absolute', width: 240, height: 240, borderRadius: 120, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.1)' },
   radarRing2: { position: 'absolute', width: 160, height: 160, borderRadius: 80, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.2)' },
   radarRing1: { position: 'absolute', width: 80, height: 80, borderRadius: 40, borderWidth: 1, borderColor: 'rgba(255, 59, 48, 0.35)' },
@@ -475,7 +556,7 @@ const styles = StyleSheet.create({
   pinBlood: { color: '#fff', fontSize: 11, fontWeight: '900' },
   sheet: { width: '100%', backgroundColor: '#16181a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#26292d' },
   sheetTitle: { color: '#8e8e93', fontSize: 11, fontWeight: '700', marginBottom: 8 },
-  donorListScroll: { maxHeight: 110, marginBottom: 8 },
+  donorListScroll: { maxHeight: 100, marginBottom: 8 },
   donorCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0c0d0e', padding: 8, borderRadius: 8, marginBottom: 6 },
   donorIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255, 59, 48, 0.2)', justifyContent: 'center', alignItems: 'center' },
   donorIconText: { color: '#ff3b30', fontWeight: '900', fontSize: 11 },
@@ -496,6 +577,7 @@ const styles = StyleSheet.create({
   sosButtonText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   subTitle: { color: '#8e8e93', fontSize: 13, marginTop: 4, marginBottom: 28 },
   label: { alignSelf: 'flex-start', color: '#8e8e93', fontSize: 11, fontWeight: '700', marginBottom: 8 },
+  resendBtnText: { color: '#007aff', fontSize: 12, fontWeight: '700', marginBottom: 8 },
   input: { width: '100%', height: 48, backgroundColor: '#16181a', borderRadius: 8, paddingHorizontal: 16, color: '#fff', borderWidth: 1, borderColor: '#26292d', marginBottom: 16 },
   registeredBar: { width: '100%', padding: 12, backgroundColor: '#16181a', borderRadius: 8, borderWidth: 1, borderColor: '#26292d', marginBottom: 12 },
   registeredText: { color: '#fff', fontSize: 14, fontWeight: '600' },
