@@ -4,7 +4,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator,
 const API_BASE_URL = "https://raktasetu-uvna.onrender.com";
 const BLOOD_GROUPS = ['A+', 'A-', 'B-', 'AB-', 'B+', 'O+', 'O-', 'AB+'];
 
-// High-Pitch Emergency Siren (Web Audio API with Auto-Resume)
+// Emergency High-Pitch Siren Generator using Web Audio API
 const playEmergencyBeep = async () => {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -19,16 +19,15 @@ const playEmergencyBeep = async () => {
     const gainNode = audioCtx.createGain();
 
     osc.type = 'sawtooth';
-    
-    // Siren Frequency Modulation (High-Low-High Siren Pitch)
     const now = audioCtx.currentTime;
+    
+    // Siren Tone Pitch Modulation
     osc.frequency.setValueAtTime(800, now);
     osc.frequency.linearRampToValueAtTime(1200, now + 0.3);
     osc.frequency.linearRampToValueAtTime(700, now + 0.6);
     osc.frequency.linearRampToValueAtTime(1200, now + 0.9);
     osc.frequency.linearRampToValueAtTime(600, now + 1.3);
 
-    // Volume ramp
     gainNode.gain.setValueAtTime(0.5, now);
     gainNode.gain.exponentialRampToValueAtTime(0.01, now + 1.4);
 
@@ -38,15 +37,15 @@ const playEmergencyBeep = async () => {
     osc.start(now);
     osc.stop(now + 1.4);
   } catch (err) {
-    console.warn("Audio Play Error:", err);
+    console.warn("Audio Context Warning:", err);
   }
 };
 
 export default function App() {
-  const [screen, setScreen] = useState('onboarding');
+  const [screen, setScreen] = useState('onboarding'); // 'onboarding' | 'map' | 'chat'
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [selectedBlood, setSelectedBlood] = useState('AB+'); // డోనర్ గ్రూప్
-  const [requiredBlood, setRequiredBlood] = useState('A+');   // కావాల్సిన గ్రూప్
+  const [selectedBlood, setSelectedBlood] = useState('AB+'); // రిజిస్టర్ చేసుకున్న రక్త వర్గం
+  const [requiredBlood, setRequiredBlood] = useState('A+');   // అత్యవసరంగా కావాల్సిన రక్త వర్గం
   const [otp, setOtp] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -54,16 +53,14 @@ export default function App() {
   const [userUUID, setUserUUID] = useState('');
   const [nearbyDonors, setNearbyDonors] = useState([]);
   
-  // SOS & Chat State
+  // SOS, Alerts & Chat State
   const [currentSOS, setCurrentSOS] = useState(null);
   const [incomingAlertModal, setIncomingAlertModal] = useState(false);
+  const [dismissedSosPhone, setDismissedSosPhone] = useState(null); // Dismissed SOS ట్రాకర్
   const [chatMessage, setChatMessage] = useState('');
   const [chatLogs, setChatLogs] = useState([]);
-  
-  // Ref to prevent continuous re-alert looping
-  const lastAlertedSosId = useRef(null);
 
-  // 1. Send OTP
+  // ================= 1. SEND OTP =================
   const handleSendOTP = async () => {
     if (phoneNumber.length !== 10) {
       alert('దయచేసి 10 అంకెల మొబైల్ నంబర్ ఇవ్వండి.');
@@ -86,7 +83,7 @@ export default function App() {
     }
   };
 
-  // 2. Verify OTP & Enter Radar
+  // ================= 2. VERIFY OTP & ENTER RADAR =================
   const handleVerifyOTP = async () => {
     if (otp.length < 4) {
       alert('సరైన OTP ఇవ్వండి.');
@@ -109,7 +106,13 @@ export default function App() {
       const res = await fetch(`${API_BASE_URL}/api/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phoneNumber, otp, bloodGroup: selectedBlood, latitude: lat, longitude: lng }),
+        body: JSON.stringify({ 
+          phoneNumber, 
+          otp, 
+          bloodGroup: selectedBlood, 
+          latitude: lat, 
+          longitude: lng 
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -125,7 +128,7 @@ export default function App() {
     }
   };
 
-  // 3. Radar & Emergency Poller
+  // ================= 3. RADAR & EMERGENCY POLLER (EVERY 2 SECONDS) =================
   const pollServerState = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/get-nearby-donors`);
@@ -139,23 +142,30 @@ export default function App() {
           setCurrentSOS(data.activeSOS);
           setChatLogs(data.activeSOS.messages || []);
 
-          // చెకింగ్: అడిగిన గ్రూప్ లేదా డిఫాల్ట్ గ్రూప్ నా బ్లడ్ గ్రూప్‌తో మ్యాచ్ అయిందా
+          // కేవలం కోరిన గ్రూప్ ఉన్నవారికి + డిస్మిస్ చేయని వారికి మాత్రమే సైరన్ మరియు మోడల్
           const targetGroup = data.activeSOS.requiredBloodGroup || data.activeSOS.bloodGroup;
           const isTargetDonor = targetGroup === selectedBlood;
+          const isNotDismissed = dismissedSosPhone !== data.activeSOS.requesterPhone;
 
-          if (data.activeSOS.requesterPhone !== phoneNumber && !data.activeSOS.acceptedDonorId && isTargetDonor) {
+          if (data.activeSOS.requesterPhone !== phoneNumber && !data.activeSOS.acceptedDonorId && isTargetDonor && isNotDismissed) {
             playEmergencyBeep();
             setIncomingAlertModal(true);
           }
 
+          // డోనర్ రిక్వెస్ట్‌ని Approve చేయగానే ఇద్దరికీ ఆటోమేటిక్‌గా Chat స్క్రీన్ ఓపెన్ అవుతుంది
           if (data.activeSOS.acceptedDonorId) {
             setIncomingAlertModal(false);
-            if (screen === 'map') setScreen('chat');
+            if (screen === 'map') {
+              setScreen('chat');
+            }
           }
         } else {
           setCurrentSOS(null);
           setIncomingAlertModal(false);
-          if (screen === 'chat') setScreen('map');
+          setDismissedSosPhone(null);
+          if (screen === 'chat') {
+            setScreen('map');
+          }
         }
       }
     } catch (err) {
@@ -169,13 +179,11 @@ export default function App() {
       const interval = setInterval(pollServerState, 2000);
       return () => clearInterval(interval);
     }
-  }, [screen, selectedBlood]);
+  }, [screen, selectedBlood, dismissedSosPhone]);
 
-  // 4. Trigger Emergency Blood SOS
+  // ================= 4. TRIGGER EMERGENCY BLOOD SOS =================
   const handleTriggerSOS = async () => {
-    // బటన్ నొక్కినప్పుడే యూజర్ యొక్క ఆడియో సందర్భాన్ని ఒకసారి అన్‌లాక్ చేద్దాం
     playEmergencyBeep();
-
     try {
       await fetch(`${API_BASE_URL}/api/trigger-sos`, {
         method: 'POST',
@@ -188,13 +196,13 @@ export default function App() {
         }),
       });
       alert(`🚨 ${requiredBlood} బ్లడ్ అత్యవసర రిక్వెస్ట్ సమీప డోనర్లకు పంపబడింది!`);
-      setScreen('chat');
+      // రిక్వెస్ట్ పెట్టిన వ్యక్తి స్క్రీన్ మారదు (డోనర్ అప్రూవ్ చేసే వరకు వేచి చూస్తారు)
     } catch {
       alert('SOS ట్రిగ్గర్ కాలేదు.');
     }
   };
 
-  // 5. Donor Approves Request
+  // ================= 5. DONOR ACCEPTS REQUEST =================
   const handleAcceptSOS = async () => {
     try {
       await fetch(`${API_BASE_URL}/api/accept-sos`, {
@@ -209,7 +217,7 @@ export default function App() {
     }
   };
 
-  // 6. Send Anonymous Chat Message
+  // ================= 6. SEND ANONYMOUS CHAT MESSAGE =================
   const handleSendMessage = async () => {
     if (!chatMessage.trim()) return;
     try {
@@ -225,13 +233,15 @@ export default function App() {
     }
   };
 
-  // 7. Close Chat Session & Purge
+  // ================= 7. CLOSE CHAT SESSION & PURGE =================
   const handleCloseSession = async () => {
     await fetch(`${API_BASE_URL}/api/close-sos`, { method: 'POST' });
     setScreen('map');
   };
 
-  // ================= SCREEN 2: GHOST-PIN MAP RADAR =================
+  // =========================================================================
+  // SCREEN 2: GHOST-PIN MAP RADAR
+  // =========================================================================
   if (screen === 'map') {
     return (
       <View style={styles.container}>
@@ -257,6 +267,7 @@ export default function App() {
               { top: '25%', left: '25%' },
               { top: '65%', right: '22%' },
               { bottom: '20%', left: '30%' },
+              { top: '40%', right: '35%' },
             ];
             const pos = positions[idx % positions.length];
             return (
@@ -270,18 +281,20 @@ export default function App() {
         <View style={styles.sheet}>
           <Text style={styles.sheetTitle}>Live Anonymous Donors Near You ({nearbyDonors.length} Online)</Text>
 
-          {nearbyDonors.map((d, index) => (
-            <View key={index} style={styles.donorCard}>
-              <View style={styles.donorIcon}>
-                <Text style={styles.donorIconText}>{d.bloodGroup}</Text>
+          <ScrollView style={styles.donorListScroll} showsVerticalScrollIndicator={false}>
+            {nearbyDonors.map((d, index) => (
+              <View key={index} style={styles.donorCard}>
+                <View style={styles.donorIcon}>
+                  <Text style={styles.donorIconText}>{d.bloodGroup}</Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.donorIdText}>ID: {d.id} (Verified)</Text>
+                  <Text style={styles.donorDistanceText}>📍 Vicinity: ~{((index + 1) * 0.4).toFixed(1)}km away</Text>
+                </View>
+                <View style={styles.onlineDot} />
               </View>
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Text style={styles.donorIdText}>ID: {d.id} (Verified)</Text>
-                <Text style={styles.donorDistanceText}>📍 Vicinity: ~{((index + 1) * 0.4).toFixed(1)}km away</Text>
-              </View>
-              <View style={styles.onlineDot} />
-            </View>
-          ))}
+            ))}
+          </ScrollView>
 
           {/* REQUIRED BLOOD GROUP SELECTOR */}
           <View style={styles.requiredSelectorContainer}>
@@ -312,7 +325,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* INCOMING EMERGENCY POPUP MODAL */}
+        {/* INCOMING EMERGENCY POPUP MODAL WITH SOUND */}
         <Modal visible={incomingAlertModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -324,7 +337,13 @@ export default function App() {
               <TouchableOpacity style={styles.approveBtn} onPress={handleAcceptSOS}>
                 <Text style={styles.approveBtnText}>✅ APPROVE & OPEN ANONYMOUS CHAT</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.declineBtn} onPress={() => setIncomingAlertModal(false)}>
+              <TouchableOpacity 
+                style={styles.declineBtn} 
+                onPress={() => {
+                  setDismissedSosPhone(currentSOS?.requesterPhone);
+                  setIncomingAlertModal(false);
+                }}
+              >
                 <Text style={styles.declineBtnText}>Dismiss</Text>
               </TouchableOpacity>
             </View>
@@ -334,7 +353,9 @@ export default function App() {
     );
   }
 
-  // ================= SCREEN 3: LIVE SECURE ANONYMOUS CHAT =================
+  // =========================================================================
+  // SCREEN 3: LIVE SECURE ANONYMOUS CHAT
+  // =========================================================================
   if (screen === 'chat') {
     return (
       <View style={styles.container}>
@@ -379,7 +400,9 @@ export default function App() {
     );
   }
 
-  // ================= SCREEN 1: ONBOARDING =================
+  // =========================================================================
+  // SCREEN 1: ONBOARDING & REGISTRATION
+  // =========================================================================
   return (
     <View style={styles.container}>
       <Text style={styles.logo}>RaktSetu</Text>
@@ -452,20 +475,24 @@ const styles = StyleSheet.create({
   pinBlood: { color: '#fff', fontSize: 11, fontWeight: '900' },
   sheet: { width: '100%', backgroundColor: '#16181a', borderRadius: 16, padding: 14, borderWidth: 1, borderColor: '#26292d' },
   sheetTitle: { color: '#8e8e93', fontSize: 11, fontWeight: '700', marginBottom: 8 },
+  donorListScroll: { maxHeight: 110, marginBottom: 8 },
   donorCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0c0d0e', padding: 8, borderRadius: 8, marginBottom: 6 },
   donorIcon: { width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255, 59, 48, 0.2)', justifyContent: 'center', alignItems: 'center' },
   donorIconText: { color: '#ff3b30', fontWeight: '900', fontSize: 11 },
   donorIdText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   donorDistanceText: { color: '#8e8e93', fontSize: 10 },
   onlineDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#00e676' },
-  requiredSelectorContainer: { marginTop: 10, marginBottom: 8, width: '100%' },
+
+  // Required Blood Group Selector
+  requiredSelectorContainer: { marginTop: 6, marginBottom: 8, width: '100%' },
   requiredSelectorLabel: { color: '#ff4d4d', fontSize: 11, fontWeight: '800', marginBottom: 6, letterSpacing: 0.5 },
   requiredGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', width: '100%' },
   reqBloodBtn: { width: '23%', height: 34, backgroundColor: '#0c0d0e', borderRadius: 6, justifyContent: 'center', alignItems: 'center', marginBottom: 6, borderWidth: 1, borderColor: '#333' },
   reqBloodBtnActive: { backgroundColor: '#ff3b30', borderColor: '#ff3b30' },
   reqBloodBtnText: { color: '#888', fontWeight: '700', fontSize: 12 },
   reqBloodBtnTextActive: { color: '#fff' },
-  sosButton: { width: '100%', height: 48, backgroundColor: '#ff3b30', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 6 },
+
+  sosButton: { width: '100%', height: 48, backgroundColor: '#ff3b30', borderRadius: 8, justifyContent: 'center', alignItems: 'center', marginTop: 4 },
   sosButtonText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   subTitle: { color: '#8e8e93', fontSize: 13, marginTop: 4, marginBottom: 28 },
   label: { alignSelf: 'flex-start', color: '#8e8e93', fontSize: 11, fontWeight: '700', marginBottom: 8 },
