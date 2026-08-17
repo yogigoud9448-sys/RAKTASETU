@@ -9,12 +9,12 @@ app.use(express.json());
 
 const otpStore = {};
 let activeDonors = [];
-let activeSOS = null; // { requesterPhone, bloodGroup, requiredBloodGroup, requesterId, acceptedDonorId, messages: [] }
+let activeSOS = null;
 
 // Health check
 app.get('/', (req, res) => res.send('🚀 RaktSetu Backend is running!'));
 
-// Send OTP
+// Send / Resend OTP
 app.post('/api/send-otp', (req, res) => {
   const { phoneNumber } = req.body;
   if (!phoneNumber || phoneNumber.length !== 10) {
@@ -23,7 +23,7 @@ app.post('/api/send-otp', (req, res) => {
   const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
   otpStore[phoneNumber] = generatedOtp;
   console.log(`📱 OTP for ${phoneNumber}: [ ${generatedOtp} ]`);
-  res.json({ success: true, message: `OTP పంపబడింది! (టెస్ట్ OTP: ${generatedOtp})` });
+  res.json({ success: true, otp: generatedOtp, message: `OTP పంపబడింది! (టెస్ట్ OTP: ${generatedOtp})` });
 });
 
 // Verify OTP
@@ -64,16 +64,15 @@ app.get('/api/get-nearby-donors', (req, res) => {
   });
 });
 
-// Trigger SOS (Updated with requiredBloodGroup)
+// Trigger SOS
 app.post('/api/trigger-sos', (req, res) => {
   const { phoneNumber, bloodGroup, requiredBloodGroup, userUUID } = req.body;
-  
   const targetBlood = requiredBloodGroup || bloodGroup;
 
   activeSOS = {
     requesterPhone: phoneNumber,
-    bloodGroup: bloodGroup,                     // రిక్వెస్టర్ గ్రూప్
-    requiredBloodGroup: targetBlood,            // అత్యవసరంగా కావాల్సిన టార్గెట్ గ్రూప్
+    bloodGroup: bloodGroup,
+    requiredBloodGroup: targetBlood,
     requesterId: userUUID,
     acceptedDonorId: null,
     messages: [
@@ -81,11 +80,11 @@ app.post('/api/trigger-sos', (req, res) => {
     ]
   };
 
-  console.log(`🚨 SOS Triggered by ${userUUID} | Requester: ${bloodGroup} | Target: ${targetBlood}`);
+  console.log(`🚨 SOS Triggered by ${userUUID} | Target: ${targetBlood}`);
   res.json({ success: true, message: `SOS Broadcasted for ${targetBlood} donors!` });
 });
 
-// Accept SOS (by nearby donor)
+// Accept SOS
 app.post('/api/accept-sos', (req, res) => {
   const { donorId } = req.body;
   if (activeSOS) {
@@ -114,6 +113,14 @@ app.post('/api/send-chat', (req, res) => {
 app.post('/api/close-sos', (req, res) => {
   activeSOS = null;
   console.log(`🧹 SOS Session Closed and Data Purged.`);
+  res.json({ success: true });
+});
+
+// Logout & Remove User from Map
+app.post('/api/logout', (req, res) => {
+  const { phoneNumber, userUUID } = req.body;
+  activeDonors = activeDonors.filter(d => d.phoneNumber !== phoneNumber && d.id !== userUUID);
+  console.log(`🚪 User Logged out: ${userUUID || phoneNumber}`);
   res.json({ success: true });
 });
 

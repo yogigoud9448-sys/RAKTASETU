@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Modal } from 'react-native';
 
 const API_BASE_URL = "https://raktasetu-uvna.onrender.com";
 const BLOOD_GROUPS = ['A+', 'A-', 'B-', 'AB-', 'B+', 'O+', 'O-', 'AB+'];
 
-// Emergency High-Pitch Siren Generator
+// High-Pitch Emergency Siren Generator
 const playEmergencyBeep = async () => {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -59,7 +59,7 @@ export default function App() {
   const [chatMessage, setChatMessage] = useState('');
   const [chatLogs, setChatLogs] = useState([]);
 
-  // ================= 1. SESSION RESTORE (NO LOGOUT ON REFRESH) =================
+  // 1. Session Restore (No Logout on Refresh)
   useEffect(() => {
     try {
       const savedUser = localStorage.getItem('raktsetu_session');
@@ -73,21 +73,20 @@ export default function App() {
         }
       }
     } catch (e) {
-      console.warn("Local storage parse error", e);
+      console.warn("Session restore error", e);
     }
   }, []);
 
-  // ================= 2. BROWSER / MOBILE STEP-BY-STEP BACK BUTTON =================
+  // 2. Step-by-Step Back Navigation
   useEffect(() => {
     const handlePopState = (event) => {
       if (event.state && event.state.screen) {
         setScreen(event.state.screen);
       } else {
-        // Step-by-step back fallback
         setScreen((prev) => {
           if (prev === 'chat') return 'map';
           if (prev === 'map') {
-            localStorage.removeItem('raktsetu_session');
+            handleLogout();
             return 'onboarding';
           }
           return prev;
@@ -97,14 +96,14 @@ export default function App() {
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [phoneNumber, userUUID]);
 
   const navigateTo = (newScreen) => {
     window.history.pushState({ screen: newScreen }, "");
     setScreen(newScreen);
   };
 
-  // ================= 3. SEND / RESEND OTP =================
+  // 3. Send / Resend OTP
   const handleSendOTP = async (isResend = false) => {
     if (phoneNumber.length !== 10) {
       alert('దయచేసి 10 అంకెల మొబైల్ నంబర్ ఇవ్వండి.');
@@ -121,10 +120,8 @@ export default function App() {
       setOtpSent(true);
       if (isResend) {
         setOtp('');
-        alert('🔄 కొత్త OTP విజయవంతంగా పంపబడింది!');
-      } else {
-        alert(data.message);
       }
+      alert(data.message || `OTP పంపబడింది! (టెస్ట్ OTP: ${data.otp})`);
     } catch {
       alert('సర్వర్ కనెక్ట్ కాలేదు.');
     } finally {
@@ -132,7 +129,7 @@ export default function App() {
     }
   };
 
-  // ================= 4. VERIFY OTP & ENTER RADAR =================
+  // 4. Verify OTP & Enter Radar
   const handleVerifyOTP = async () => {
     if (otp.length < 4) {
       alert('సరైన OTP ఇవ్వండి.');
@@ -166,7 +163,6 @@ export default function App() {
       const data = await res.json();
       if (data.success) {
         setUserUUID(data.userUUID);
-        // సెషన్‌ను సేవ్ చేయడం
         localStorage.setItem('raktsetu_session', JSON.stringify({
           phoneNumber,
           bloodGroup: selectedBlood,
@@ -183,7 +179,7 @@ export default function App() {
     }
   };
 
-  // ================= 5. POLLER (EVERY 2 SECONDS) =================
+  // 5. Radar & Emergency Poller (1-to-1 Private Chat Protection)
   const pollServerState = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/get-nearby-donors`);
@@ -201,15 +197,28 @@ export default function App() {
           const isTargetDonor = targetGroup === selectedBlood;
           const isNotDismissed = dismissedSosPhone !== data.activeSOS.requesterPhone;
 
+          // ఇంకా ఎవరూ Accept చేయకపోతే మాత్రమే టార్గెట్ డోనర్లకు సైరన్ & అలర్ట్ మోడల్ వస్తుంది
           if (data.activeSOS.requesterPhone !== phoneNumber && !data.activeSOS.acceptedDonorId && isTargetDonor && isNotDismissed) {
             playEmergencyBeep();
             setIncomingAlertModal(true);
           }
 
+          // 1-to-1 Chat లాజిక్: కేవలం Requester మరియు Accept చేసిన Donor లకు మాత్రమే చాట్ ఓపెన్ అవుతుంది
           if (data.activeSOS.acceptedDonorId) {
-            setIncomingAlertModal(false);
-            if (screen === 'map') {
-              navigateTo('chat');
+            setIncomingAlertModal(false); // మిగిలిన డోనర్లకు పాప్-అప్ మూసివేయబడుతుంది
+            
+            const isRequester = data.activeSOS.requesterPhone === phoneNumber || data.activeSOS.requesterId === userUUID;
+            const isAcceptedDonor = data.activeSOS.acceptedDonorId === userUUID;
+
+            if (isRequester || isAcceptedDonor) {
+              if (screen === 'map') {
+                navigateTo('chat');
+              }
+            } else {
+              // మూడవ వ్యక్తి (Dismiss చేసిన లేదా accept చేయని డోనర్) Map లోనే ఉంటారు
+              if (screen === 'chat') {
+                navigateTo('map');
+              }
             }
           }
         } else {
@@ -232,9 +241,9 @@ export default function App() {
       const interval = setInterval(pollServerState, 2000);
       return () => clearInterval(interval);
     }
-  }, [screen, selectedBlood, dismissedSosPhone]);
+  }, [screen, selectedBlood, dismissedSosPhone, userUUID, phoneNumber]);
 
-  // ================= 6. TRIGGER SOS =================
+  // 6. Trigger SOS
   const handleTriggerSOS = async () => {
     playEmergencyBeep();
     try {
@@ -254,7 +263,7 @@ export default function App() {
     }
   };
 
-  // ================= 7. ACCEPT SOS =================
+  // 7. Accept SOS
   const handleAcceptSOS = async () => {
     try {
       await fetch(`${API_BASE_URL}/api/accept-sos`, {
@@ -269,7 +278,7 @@ export default function App() {
     }
   };
 
-  // ================= 8. SEND CHAT MESSAGE =================
+  // 8. Send Chat
   const handleSendMessage = async () => {
     if (!chatMessage.trim()) return;
     try {
@@ -285,14 +294,23 @@ export default function App() {
     }
   };
 
-  // ================= 9. CLOSE SOS SESSION =================
+  // 9. Close SOS Session
   const handleCloseSession = async () => {
     await fetch(`${API_BASE_URL}/api/close-sos`, { method: 'POST' });
     navigateTo('map');
   };
 
-  // ================= 10. MANUAL LOGOUT =================
-  const handleLogout = () => {
+  // 10. Logout & Purge User from Radar
+  const handleLogout = async () => {
+    try {
+      await fetch(`${API_BASE_URL}/api/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber, userUUID }),
+      });
+    } catch (e) {
+      console.warn("Logout notify error", e);
+    }
     localStorage.removeItem('raktsetu_session');
     setPhoneNumber('');
     setOtp('');
@@ -393,7 +411,7 @@ export default function App() {
           </TouchableOpacity>
         </View>
 
-        {/* INCOMING EMERGENCY POPUP MODAL WITH SOUND */}
+        {/* INCOMING EMERGENCY POPUP MODAL */}
         <Modal visible={incomingAlertModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
