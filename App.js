@@ -4,7 +4,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator,
 const API_BASE_URL = "https://raktasetu-uvna.onrender.com";
 const BLOOD_GROUPS = ['A+', 'A-', 'B-', 'AB-', 'B+', 'O+', 'O-', 'AB+'];
 
-// High-Pitch Emergency Siren Generator
+// Emergency High-Pitch Siren Generator
 const playEmergencyBeep = async () => {
   try {
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -59,8 +59,12 @@ export default function App() {
   const [chatMessage, setChatMessage] = useState('');
   const [chatLogs, setChatLogs] = useState([]);
 
-  // 1. Session Restore (No Logout on Refresh)
+  // ================= 1. INITIAL BROWSER HISTORY SETUP & RESTORE =================
   useEffect(() => {
+    if (!window.history.state) {
+      window.history.replaceState({ screen: 'onboarding' }, '');
+    }
+
     try {
       const savedUser = localStorage.getItem('raktsetu_session');
       if (savedUser) {
@@ -70,6 +74,7 @@ export default function App() {
           setSelectedBlood(session.bloodGroup || 'AB+');
           setUserUUID(session.userUUID);
           setScreen('map');
+          window.history.pushState({ screen: 'map' }, '');
         }
       }
     } catch (e) {
@@ -77,36 +82,39 @@ export default function App() {
     }
   }, []);
 
-  // 2. Step-by-Step Back Navigation
+  // ================= 2. STEP-BY-STEP BACK BUTTON EVENT HANDLER =================
   useEffect(() => {
     const handlePopState = (event) => {
       if (event.state && event.state.screen) {
         setScreen(event.state.screen);
+        if (event.state.screen === 'onboarding') {
+          localStorage.removeItem('raktsetu_session');
+        }
       } else {
         setScreen((prev) => {
           if (prev === 'chat') return 'map';
           if (prev === 'map') {
-            handleLogout();
+            localStorage.removeItem('raktsetu_session');
             return 'onboarding';
           }
-          return prev;
+          return 'onboarding';
         });
       }
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [phoneNumber, userUUID]);
+  }, []);
 
   const navigateTo = (newScreen) => {
-    window.history.pushState({ screen: newScreen }, "");
+    window.history.pushState({ screen: newScreen }, '');
     setScreen(newScreen);
   };
 
-  // 3. Send / Resend OTP
+  // ================= 3. SEND / RESEND OTP =================
   const handleSendOTP = async (isResend = false) => {
     if (phoneNumber.length !== 10) {
-      alert('దయచేసి 10 అంకెల మొబైల్ నంబర్ ఇవ్వండి.');
+      alert('Please enter a valid 10-digit mobile number.');
       return;
     }
     setLoading(true);
@@ -121,18 +129,18 @@ export default function App() {
       if (isResend) {
         setOtp('');
       }
-      alert(data.message || `OTP పంపబడింది! (టెస్ట్ OTP: ${data.otp})`);
+      alert(data.message || `OTP Sent Successfully! (Test OTP: ${data.otp})`);
     } catch {
-      alert('సర్వర్ కనెక్ట్ కాలేదు.');
+      alert('Unable to connect to server.');
     } finally {
       setLoading(false);
     }
   };
 
-  // 4. Verify OTP & Enter Radar
+  // ================= 4. VERIFY OTP & ENTER MAP =================
   const handleVerifyOTP = async () => {
     if (otp.length < 4) {
-      alert('సరైన OTP ఇవ్వండి.');
+      alert('Please enter a valid OTP.');
       return;
     }
     setLoading(true);
@@ -173,13 +181,13 @@ export default function App() {
         alert(data.message);
       }
     } catch {
-      alert('వెరిఫికేషన్ ఎర్రర్ వచ్చింది.');
+      alert('Verification error occurred.');
     } finally {
       setLoading(false);
     }
   };
 
-  // 5. Radar & Emergency Poller (1-to-1 Private Chat Protection)
+  // ================= 5. RADAR & EMERGENCY POLLER =================
   const pollServerState = async () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/get-nearby-donors`);
@@ -197,15 +205,13 @@ export default function App() {
           const isTargetDonor = targetGroup === selectedBlood;
           const isNotDismissed = dismissedSosPhone !== data.activeSOS.requesterPhone;
 
-          // ఇంకా ఎవరూ Accept చేయకపోతే మాత్రమే టార్గెట్ డోనర్లకు సైరన్ & అలర్ట్ మోడల్ వస్తుంది
           if (data.activeSOS.requesterPhone !== phoneNumber && !data.activeSOS.acceptedDonorId && isTargetDonor && isNotDismissed) {
             playEmergencyBeep();
             setIncomingAlertModal(true);
           }
 
-          // 1-to-1 Chat లాజిక్: కేవలం Requester మరియు Accept చేసిన Donor లకు మాత్రమే చాట్ ఓపెన్ అవుతుంది
           if (data.activeSOS.acceptedDonorId) {
-            setIncomingAlertModal(false); // మిగిలిన డోనర్లకు పాప్-అప్ మూసివేయబడుతుంది
+            setIncomingAlertModal(false);
             
             const isRequester = data.activeSOS.requesterPhone === phoneNumber || data.activeSOS.requesterId === userUUID;
             const isAcceptedDonor = data.activeSOS.acceptedDonorId === userUUID;
@@ -215,7 +221,6 @@ export default function App() {
                 navigateTo('chat');
               }
             } else {
-              // మూడవ వ్యక్తి (Dismiss చేసిన లేదా accept చేయని డోనర్) Map లోనే ఉంటారు
               if (screen === 'chat') {
                 navigateTo('map');
               }
@@ -243,7 +248,7 @@ export default function App() {
     }
   }, [screen, selectedBlood, dismissedSosPhone, userUUID, phoneNumber]);
 
-  // 6. Trigger SOS
+  // ================= 6. TRIGGER SOS =================
   const handleTriggerSOS = async () => {
     playEmergencyBeep();
     try {
@@ -257,13 +262,13 @@ export default function App() {
           userUUID 
         }),
       });
-      alert(`🚨 ${requiredBlood} బ్లడ్ అత్యవసర రిక్వెస్ట్ సమీప డోనర్లకు పంపబడింది!`);
+      alert(`🚨 Emergency SOS request for ${requiredBlood} blood sent to nearby donors!`);
     } catch {
-      alert('SOS ట్రిగ్గర్ కాలేదు.');
+      alert('Failed to trigger SOS.');
     }
   };
 
-  // 7. Accept SOS
+  // ================= 7. ACCEPT SOS =================
   const handleAcceptSOS = async () => {
     try {
       await fetch(`${API_BASE_URL}/api/accept-sos`, {
@@ -274,11 +279,11 @@ export default function App() {
       setIncomingAlertModal(false);
       navigateTo('chat');
     } catch {
-      alert('యాక్సెప్ట్ చేయడంలో సమస్య వచ్చింది.');
+      alert('Error accepting the request.');
     }
   };
 
-  // 8. Send Chat
+  // ================= 8. SEND CHAT =================
   const handleSendMessage = async () => {
     if (!chatMessage.trim()) return;
     try {
@@ -290,17 +295,17 @@ export default function App() {
       setChatMessage('');
       pollServerState();
     } catch {
-      alert('మెసేజ్ పంపబడలేదు.');
+      alert('Message could not be sent.');
     }
   };
 
-  // 9. Close SOS Session
+  // ================= 9. CLOSE SOS SESSION =================
   const handleCloseSession = async () => {
     await fetch(`${API_BASE_URL}/api/close-sos`, { method: 'POST' });
     navigateTo('map');
   };
 
-  // 10. Logout & Purge User from Radar
+  // ================= 10. MANUAL LOGOUT =================
   const handleLogout = async () => {
     try {
       await fetch(`${API_BASE_URL}/api/logout`, {
@@ -320,12 +325,15 @@ export default function App() {
   };
 
   // =========================================================================
-  // SCREEN 2: GHOST-PIN MAP RADAR
+  // SCREEN 2: GHOST-PIN MAP RADAR (REQUEST BLOOD SCREEN)
   // =========================================================================
   if (screen === 'map') {
     return (
       <View style={styles.container}>
         <View style={styles.topBar}>
+          <TouchableOpacity onPress={() => window.history.back()} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>‹ Back</Text>
+          </TouchableOpacity>
           <Text style={styles.logo}>RaktSetu</Text>
           <TouchableOpacity onPress={handleLogout} style={styles.logoutBtn}>
             <Text style={styles.logoutBtnText}>Logout</Text>
@@ -446,7 +454,7 @@ export default function App() {
     return (
       <View style={styles.container}>
         <View style={styles.topBar}>
-          <TouchableOpacity onPress={() => navigateTo('map')} style={styles.backBtn}>
+          <TouchableOpacity onPress={() => window.history.back()} style={styles.backBtn}>
             <Text style={styles.backBtnText}>‹ Map</Text>
           </TouchableOpacity>
           <Text style={styles.logo}>RaktSetu Chat</Text>

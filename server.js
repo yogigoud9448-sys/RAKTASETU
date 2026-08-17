@@ -18,12 +18,12 @@ app.get('/', (req, res) => res.send('🚀 RaktSetu Backend is running!'));
 app.post('/api/send-otp', (req, res) => {
   const { phoneNumber } = req.body;
   if (!phoneNumber || phoneNumber.length !== 10) {
-    return res.status(400).json({ success: false, message: 'దయచేసి 10 అంకెల మొబైల్ నంబర్ ఇవ్వండి.' });
+    return res.status(400).json({ success: false, message: 'Please enter a valid 10-digit mobile number.' });
   }
   const generatedOtp = Math.floor(1000 + Math.random() * 9000).toString();
   otpStore[phoneNumber] = generatedOtp;
   console.log(`📱 OTP for ${phoneNumber}: [ ${generatedOtp} ]`);
-  res.json({ success: true, otp: generatedOtp, message: `OTP పంపబడింది! (టెస్ట్ OTP: ${generatedOtp})` });
+  res.json({ success: true, otp: generatedOtp, message: `OTP Sent Successfully! (Test OTP: ${generatedOtp})` });
 });
 
 // Verify OTP
@@ -32,7 +32,7 @@ app.post('/api/verify-otp', (req, res) => {
   const validOtp = otpStore[phoneNumber];
 
   if (!validOtp || validOtp !== otp.trim()) {
-    return res.status(400).json({ success: false, message: '❌ తప్పు OTP! దయచేసి సరైన OTP ఇవ్వండి.' });
+    return res.status(400).json({ success: false, message: '❌ Invalid OTP! Please enter the correct OTP.' });
   }
 
   const userUUID = 'DONOR-' + Math.random().toString(36).substr(2, 5).toUpperCase();
@@ -81,7 +81,7 @@ app.post('/api/trigger-sos', (req, res) => {
   };
 
   console.log(`🚨 SOS Triggered by ${userUUID} | Target: ${targetBlood}`);
-  res.json({ success: true, message: `SOS Broadcasted for ${targetBlood} donors!` });
+  res.json({ success: true, message: `SOS broadcasted to ${targetBlood} donors successfully!` });
 });
 
 // Accept SOS
@@ -116,7 +116,7 @@ app.post('/api/close-sos', (req, res) => {
   res.json({ success: true });
 });
 
-// Logout & Remove User from Map
+// Logout & Purge User from Radar
 app.post('/api/logout', (req, res) => {
   const { phoneNumber, userUUID } = req.body;
   activeDonors = activeDonors.filter(d => d.phoneNumber !== phoneNumber && d.id !== userUUID);
